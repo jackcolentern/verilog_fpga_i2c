@@ -5,7 +5,10 @@ module iic_r(
 	input button,
 	output[7:0] LED,
 	
-	output[3:0] LEDDEBUG
+	output[3:0] LEDDEBUG,
+	
+	output[7:0] segments,
+	output[3:0] digits
 
 	);
 	
@@ -14,6 +17,7 @@ module iic_r(
 	parameter START = 3'b010;
 	parameter ACK = 3'b011;
 	parameter END = 3'b100;
+	parameter TOSTART2 = 3'b101;
 	
 	reg[2:0] state;
 	reg[3:0] send_cnt;
@@ -40,7 +44,9 @@ module iic_r(
 	wire byte_ok;
 	wire clk_400k;
 	reg[7:0] data_length;
-	reg[7:0] data_received;
+	reg[15:0] data_received;
+	
+	reg[23:0]reread;
 	
 	initial begin
 		write_read <= 1'b0;
@@ -53,8 +59,13 @@ module iic_r(
 		.inclk0(clk),
 		.c0(clk_400k)
 		);
-	
-	//always @(sda_out) to_sda = (sda_out)?sda:1'bz;
+		
+	seven_segment ss(
+		.clk(clk),
+		.data(data_received),
+		.segments(segments),
+		.digits(digits)
+	);	
 	
 	always @(posedge clk_400k) begin
 		cnt <= cnt + 1'b1;
@@ -63,7 +74,17 @@ module iic_r(
 		
 	always @(posedge cnt[0]) begin //we reached a middle point
 	
-		if(state == TOSTART && success != 7'b0) state <= START;
+		if(state == END)begin
+			reread <= reread + 1'b1;
+			if(reread == 18'b10000000000000)begin
+				reread <= 24'b0;
+				state <= IDLE;
+			end
+		end
+	
+		if(state == TOSTART2) state <= TOSTART;
+
+		if(state == TOSTART) state <= START;
 		
 		//if(state == TOSTART && success != 7'b1) state <= START;
 
@@ -81,7 +102,7 @@ module iic_r(
 
 		
 		if(cnt[1] == 1'b0) begin //low middle point
-			
+
 			if(success == 7'b00) begin //sending address
 				if(state == START) begin
 					sda_out <= 1;
@@ -96,7 +117,7 @@ module iic_r(
 			end
 			
 			else begin //receiving
-				
+	
 				if(state == START) begin
 					scl_out <= 1'b1;
 					sda_out <= 1'b0;
@@ -126,7 +147,7 @@ module iic_r(
 		end
 		
 		else begin //high middle point
-			
+
 			if(success == 7'b00) begin //sending address
 
 				if(state == IDLE) begin
@@ -142,41 +163,33 @@ module iic_r(
 					end
 				end
 				
-			if(state == ACK && sda_out == 1'b0) begin
-				cnt_timeout <= cnt_timeout + 1;
-				
-				
-				if(cnt_timeout == 2'b11)begin
-					cnt_timeout <= 2'b00;
-					failed <= 1'b1;
-					success <= success + 1'b1;
-					sda_out <= 1'b0;
-					send_cnt <= 4'b1001;
-					//state <= TOSTART;
+				if(state == ACK && sda_out == 1'b0) begin
+					cnt_timeout <= cnt_timeout + 1;
 					
-				end
-				
-				if(sda_pin == 1'b0) begin
-					success <= success + 1'b1;
-					sda_out <= 1'b0;
-					send_cnt <= 4'b1001;
-					state <= TOSTART;
-				end
 					
-			//	if(success == 2'b01) begin
-			//		sda <= 1'b0;
-			//		state <= END;
-			//	end
-				
-				if(state == END) begin
-					sda <= 1'b1;
-					ended <= 1'b1;
+					if(cnt_timeout == 2'b11)begin
+						cnt_timeout <= 2'b00;
+						failed <= 1'b1;
+						state <= END;
+						data_received <= 16'hDEAD;
+					end
+					
+					if(sda_pin == 1'b0) begin
+						success <= success + 1'b1;
+						sda_out <= 1'b0;
+						send_cnt <= 4'b1000;
+						state <= TOSTART2;
+					end
+					
+					if(state == END) begin
+						sda <= 1'b1;
+						ended <= 1'b1;
+					end
 				end
 			end
-		end
 		
 		else begin //receiving
-		
+
 			if(state == START) begin
 				data_received[0] <= sda_pin;
 				send_cnt <= send_cnt - 1;			
@@ -184,6 +197,11 @@ module iic_r(
 			
 			if(state == START && sda_out == 1'b1) begin
 				state <= ACK;
+			end
+		
+			if(state == END) begin
+				sda <= 1'b1;
+				ended <= 1'b1;
 			end
 			
 		end

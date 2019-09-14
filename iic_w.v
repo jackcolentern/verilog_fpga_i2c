@@ -161,7 +161,7 @@ module iic_w(
 			
 	end
 			
-	assign busy = state[2] & ~state[1] & state[0];
+	assign busy = ~(state[2] & ~state[1] & state[0]);
 	assign sda_pin = to_sda;
 	assign scl_pin = (scl_out)?cnt[1]:1'b1;
 endmodule
